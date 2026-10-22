@@ -229,8 +229,8 @@ elif page == "訓練紀錄":
         today = date.today()
         with st.spinner("正在載入訓練紀錄..."):
             activities = client.search_activities(
-                limit=50,
-                start_date=(today - timedelta(days=180)).isoformat(),
+                limit=20,
+                start_date=(today - timedelta(days=90)).isoformat(),
                 end_date=today.isoformat(),
             )
 
@@ -315,7 +315,7 @@ elif page == "長期趨勢":
         client = GarminPersonalClient(api_key)
         today = date.today()
         with st.spinner("載入趨勢..."):
-            activities = client.search_activities(limit=60, start_date=(today - timedelta(days=30)).isoformat(), end_date=today.isoformat())
+            activities = client.search_activities(limit=30, start_date=(today - timedelta(days=21)).isoformat(), end_date=today.isoformat())
         act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
         daily = {}
         for a in act_list:
@@ -345,8 +345,8 @@ elif page == "訓練負荷":
         today = date.today()
         with st.spinner("正在計算訓練負荷..."):
             activities = client.search_activities(
-                limit=100,
-                start_date=(today - timedelta(days=120)).isoformat(),
+                limit=30,
+                start_date=(today - timedelta(days=60)).isoformat(),
                 end_date=today.isoformat(),
             )
 

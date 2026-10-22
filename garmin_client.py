@@ -71,12 +71,20 @@ class GarminPersonalClient:
         )
 
     def search_activities(self, start: int = 0, limit: int = 20, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Any:
-        params = {"start": start, "limit": limit}
+        """Search activities. Falls back to no date filter if date-filtered call fails."""
+        params = {"start": start, "limit": min(limit, 50)}  # cap limit to avoid 500
         if start_date:
             params["startDate"] = start_date
         if end_date:
             params["endDate"] = end_date
-        return self.get("/activitylist-service/activities/search/activities", params=params)
+        try:
+            return self.get("/activitylist-service/activities/search/activities", params=params)
+        except Exception:
+            # Fallback: try without date filter (smaller window)
+            if start_date or end_date:
+                fallback = {"start": start, "limit": min(limit, 30)}
+                return self.get("/activitylist-service/activities/search/activities", params=fallback)
+            raise
 
     def get_daily_stress(self, start: date | str, end: date | str) -> Any:
         return self.get(
