@@ -618,13 +618,13 @@ elif page == "訓練工具箱":
     dist_map = {"5 km": 5, "10 km": 10, "半程馬拉松": 21.0975, "全馬": 42.195}
     d = dist_map.get(race_dist, 5)
     if race_time > 0 and d > 0:
-        # Simple VDOT approximation
-        pace_sec = (race_time * 60) / d
-        # Rough formula (not exact Daniels, but useful personal reference)
-        vdot = 0.000104 * (d * 1000 / (race_time * 60))**2 + 0.182258 * (d * 1000 / (race_time * 60)) - 4.6
+        # Velocity in meters per minute
+        v = (d * 1000) / race_time
+        # Jack Daniels VDOT approximation
+        vdot = -4.60 + 0.182258 * v + 0.000104 * (v ** 2)
         vdot = max(20, min(85, vdot))
         st.metric("估算 VDOT", f"{vdot:.1f}")
-        st.info("數值越高代表跑步能力越好。僅供個人參考，非官方計算。")
+        st.info("數值越高代表跑步能力越好。僅供個人參考，非官方精確計算。")
 
     st.markdown("---")
     st.markdown("### 心率區間建議（依年齡）")
