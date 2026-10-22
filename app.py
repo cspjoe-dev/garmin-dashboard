@@ -480,7 +480,60 @@ elif page == "心率與配速":
     st.stop()
 elif page == "數據關係分析":
     st.title("數據關係分析")
-    st.info("此頁面將顯示 HRV、睡眠與訓練表現的關聯。目前可先查看「訓練負荷」與「心率與配速」。")
+    st.caption("觀察心率、配速與距離的關係")
+
+    if not api_key:
+        st.warning("請先輸入 API Key。")
+        st.stop()
+
+    try:
+        client = GarminPersonalClient(api_key)
+        today = date.today()
+        with st.spinner("載入活動資料..."):
+            activities = client.search_activities(limit=30, start_date=(today - timedelta(days=60)).isoformat(), end_date=today.isoformat())
+        act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
+
+        rows = []
+        for a in act_list:
+            if not isinstance(a, dict):
+                continue
+            dist = (a.get("distance") or 0) / 1000
+            if dist < 1:
+                continue
+            avg_hr = a.get("averageHR") or a.get("averageHeartRate")
+            avg_speed = a.get("averageSpeed")
+            pace = None
+            if avg_speed and avg_speed > 0:
+                pace = 1000 / (avg_speed * 60)
+            if avg_hr and pace:
+                rows.append({
+                    "距離 (km)": round(dist, 2),
+                    "平均心率": avg_hr,
+                    "配速 (分/km)": round(pace, 2),
+                    "日期": (a.get("startTimeLocal") or "")[:10],
+                })
+
+        if not rows:
+            st.info("尚無足夠的心率與配速資料可供分析。")
+            st.stop()
+
+        df = pd.DataFrame(rows)
+        st.markdown("### 心率 vs 配速")
+        fig = go.Figure(go.Scatter(
+            x=df["配速 (分/km)"],
+            y=df["平均心率"],
+            mode="markers",
+            marker=dict(size=10, color=df["距離 (km)"], colorscale="Blues", showscale=True, colorbar=dict(title="距離")),
+            text=df["日期"],
+            hovertemplate="配速: %{x:.2f}<br>心率: %{y}<br>%{text}<extra></extra>"
+        ))
+        fig.update_layout(height=380, margin=dict(l=20, r=20, t=20, b=40), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title="配速 (分/km)", yaxis_title="平均心率")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### 活動摘要表")
+        st.dataframe(df.sort_values("日期", ascending=False), use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(f"載入失敗：{e}")
     st.stop()
 
 elif page == "本週訓練":
@@ -512,8 +565,24 @@ elif page == "本週訓練":
 
         if daily_km:
             df = pd.DataFrame(list(daily_km.items()), columns=["日期", "距離 (km)"]).sort_values("日期")
-            fig = go.Figure(go.Bar(x=df["日期"], y=df["距離 (km)"], marker_color="#3498db"))
-            fig.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            # Use short date labels to avoid Plotly datetime parsing issues
+            df["顯示日期"] = df["日期"].str[5:]  # MM-DD
+            fig = go.Figure(go.Bar(
+                x=df["顯示日期"],
+                y=df["距離 (km)"],
+                marker_color="#3498db",
+                text=df["距離 (km)"].round(1),
+                textposition="outside"
+            ))
+            fig.update_layout(
+                height=340,
+                margin=dict(l=20, r=20, t=30, b=40),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis_title="日期",
+                yaxis_title="距離 (km)",
+                showlegend=False,
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("### 活動明細")
