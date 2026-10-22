@@ -57,14 +57,17 @@ with st.sidebar:
         "本週訓練",
         "訓練工具箱",
     ]
+    if "page" not in st.session_state:
+        st.session_state["page"] = "總覽 Overview"
+
     page = st.radio(
         "功能選單",
         page_options,
-        index=page_options.index(st.session_state.get("page", "總覽 Overview")),
+        index=page_options.index(st.session_state["page"]),
         label_visibility="collapsed",
         key="sidebar_page",
+        on_change=lambda: st.session_state.update(page=st.session_state["sidebar_page"]),
     )
-    st.session_state["page"] = page
 
     st.markdown("---")
     st.subheader("Garmin 連線")
