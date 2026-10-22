@@ -14,7 +14,7 @@ from datetime import date, timedelta
 import os
 from garmin_client import GarminPersonalClient
 
-st.set_page_config(page_title="跑步儀表板", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="跑步儀表板", layout="wide", initial_sidebar_state="collapsed")
 
 # Custom CSS — cleaner modern style
 st.markdown("""
@@ -45,27 +45,30 @@ with st.sidebar:
     st.markdown("### 跑步儀表板")
     st.caption(f"{date.today().isoformat()} · HRV")
 
-    # Main navigation matching the reference image
+    # Full navigation (still available when sidebar is opened)
+    page_options = [
+        "總覽 Overview",
+        "訓練狀態",
+        "訓練紀錄",
+        "準備度分析",
+        "長期趨勢",
+        "訓練負荷",
+        "心率與配速",
+        "數據關係分析",
+        "本週訓練",
+        "計劃總覽",
+        "訓練工具箱",
+        "AI 教練",
+        "設定",
+    ]
     page = st.radio(
         "功能選單",
-        [
-            "總覽 Overview",
-            "訓練狀態",
-            "訓練紀錄",
-            "準備度分析",
-            "長期趨勢",
-            "訓練負荷",
-            "心率與配速",
-            "數據關係分析",
-            "本週訓練",
-            "計劃總覽",
-            "訓練工具箱",
-            "AI 教練",
-            "設定",
-        ],
-        index=1,  # default to 訓練狀態
+        page_options,
+        index=page_options.index(st.session_state.get("page", "訓練狀態")),
         label_visibility="collapsed",
+        key="sidebar_page",
     )
+    st.session_state["page"] = page
 
     st.markdown("---")
     st.subheader("Garmin 連線")
@@ -85,6 +88,34 @@ with st.sidebar:
         st.markdown("2. 前往 [Personal API Token](https://connect.garmin.com/app/settings/personalApiToken)")
         st.markdown("3. 建立 Key 並複製貼上")
     st.caption("官方 Personal API · 僅讀取你自己的資料")
+
+# ========== Top quick navigation (mobile friendly) ==========
+quick_pages = ["訓練狀態", "本週訓練", "訓練紀錄", "準備度分析", "訓練負荷", "訓練工具箱"]
+if "page" not in st.session_state:
+    st.session_state["page"] = "訓練狀態"
+
+st.markdown("""
+<style>
+.quick-nav button {
+    margin-right: 6px;
+    margin-bottom: 6px;
+    border-radius: 20px !important;
+    font-size: 14px !important;
+    padding: 6px 14px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+cols = st.columns(len(quick_pages))
+for i, qp in enumerate(quick_pages):
+    with cols[i]:
+        if st.button(qp, key=f"quick_{qp}", use_container_width=True,
+                     type="primary" if st.session_state["page"] == qp else "secondary"):
+            st.session_state["page"] = qp
+            st.rerun()
+
+page = st.session_state["page"]
+st.markdown("---")
 
 # ========== Page routing ==========
 if page == "訓練狀態":
