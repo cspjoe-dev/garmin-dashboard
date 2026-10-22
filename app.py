@@ -16,7 +16,7 @@ from garmin_client import GarminPersonalClient
 
 st.set_page_config(page_title="跑步儀表板", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS to mimic the beige / clean look
+# Custom CSS
 st.markdown("""
 <style>
     .main { background-color: #faf8f5; }
@@ -37,26 +37,505 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🏃 跑步準備度分析")
-st.caption("整合 Garmin 手錶資料 · 隨時查看身體狀況與訓練建議")
-
-# Sidebar for API key
+# Sidebar navigation + API key
 with st.sidebar:
-    st.header("設定")
+    st.markdown("### 跑步儀表板")
+    st.caption(f"{date.today().isoformat()} · HRV")
+
+    # Main navigation matching the reference image
+    page = st.radio(
+        "功能選單",
+        [
+            "總覽 Overview",
+            "訓練狀態",
+            "訓練紀錄",
+            "準備度分析",
+            "長期趨勢",
+            "訓練負荷",
+            "心率與配速",
+            "數據關係分析",
+            "本週訓練",
+            "計劃總覽",
+            "訓練工具箱",
+            "AI 教練",
+            "設定",
+        ],
+        index=1,  # default to 訓練狀態
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
+    st.subheader("Garmin 連線")
     api_key = st.text_input(
-        "Garmin Personal API Key",
+        "Personal API Key",
         type="password",
         value=os.getenv("GARMIN_PERSONAL_API_KEY", ""),
-        help="從 https://connect.garmin.com/app/settings/personalApiToken 取得",
+        help="從 Garmin Connect → Personal API Token 取得",
     )
-    if st.button("同步 Garmin"):
+    if st.button("同步 Garmin", use_container_width=True):
         st.session_state["force_refresh"] = True
+        st.rerun()
+
     st.markdown("---")
-    st.markdown("**如何取得 API Key？**")
-    st.markdown("1. 登入 [Garmin Connect](https://connect.garmin.com)")
-    st.markdown("2. 前往 [Personal API Token](https://connect.garmin.com/app/settings/personalApiToken)")
-    st.markdown("3. 建立 Key 並複製貼上")
-    st.info("此為官方 Personal API（2026/10 新開放），僅讀取你自己的資料，安全且免費。")
+    with st.expander("如何取得 API Key？"):
+        st.markdown("1. 登入 [Garmin Connect](https://connect.garmin.com)")
+        st.markdown("2. 前往 [Personal API Token](https://connect.garmin.com/app/settings/personalApiToken)")
+        st.markdown("3. 建立 Key 並複製貼上")
+    st.caption("官方 Personal API · 僅讀取你自己的資料")
+
+# ========== Page routing ==========
+if page == "訓練狀態":
+    st.title("訓練狀態")
+    st.caption("今日身體狀況與訓練負荷總覽")
+
+    if not api_key:
+        st.warning("請先在左側輸入 Garmin Personal API Key。")
+        # Demo values
+        readiness = 84
+        tsb = 7.2
+        status = "良好"
+        advice = "今天適合照課表或進行高強度／比賽配速跑。"
+    else:
+        try:
+            client = GarminPersonalClient(api_key)
+            today = date.today()
+            yesterday = today - timedelta(days=1)
+            with st.spinner("正在同步訓練狀態..."):
+                hrv_data = client.get_daily_hrv(today) or client.get_daily_hrv(yesterday)
+                sleep_data = client.get_daily_sleep(today) or client.get_daily_sleep(yesterday)
+                activities = client.search_activities(limit=30, start_date=(today - timedelta(days=30)).isoformat(), end_date=today.isoformat())
+
+            # Reuse simple readiness logic
+            def to_number(val, default=70):
+                if isinstance(val, (int, float)):
+                    return float(val)
+                if isinstance(val, dict):
+                    for k in ("value", "score", "overall"):
+                        if k in val and isinstance(val[k], (int, float)):
+                            return float(val[k])
+                return default
+
+            hrv_raw = (hrv_data or {}).get("lastNightAvg") or (hrv_data or {}).get("weeklyAvg")
+            hrv_val = to_number(hrv_raw, 0)
+            sleep_raw = None
+            if sleep_data:
+                sleep_raw = (
+                    sleep_data.get("dailySleepDTO", {}).get("sleepScores", {}).get("overall", {}).get("value")
+                    or sleep_data.get("sleepScores", {}).get("overall")
+                )
+            sleep_val = to_number(sleep_raw, 70)
+            hrv_factor = min(100, max(40, (hrv_val / 50) * 70)) if hrv_val else 70
+            readiness = int(0.45 * hrv_factor + 0.35 * sleep_val + 0.2 * 75)
+            readiness = max(1, min(100, readiness))
+            tsb = 5.0 + (readiness - 70) * 0.3
+
+            if readiness >= 75 and tsb > 0:
+                status = "良好"
+                advice = "今天適合照課表或進行高強度／比賽配速跑。身體恢復良好。"
+            elif readiness >= 50:
+                status = "中等"
+                advice = "建議進行中低強度訓練或輕鬆跑。"
+            else:
+                status = "偏低"
+                advice = "建議休息或安排恢復日。"
+
+        except Exception as e:
+            st.error(f"無法取得資料：{e}")
+            readiness = 70
+            tsb = 0.0
+            status = "未知"
+            advice = "請確認 API Key 或稍後再試。"
+
+    # Display
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.subheader("今日準備度")
+        color = "#2ecc71" if readiness >= 75 else "#f39c12" if readiness >= 50 else "#e74c3c"
+        st.markdown(f'<div class="readiness-score" style="color:{color}">{readiness}<span style="font-size:20px">/100</span></div>', unsafe_allow_html=True)
+        st.markdown(f"**狀態：** {status}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.subheader("訓練壓力平衡 (TSB)")
+        st.metric("TSB", f"{tsb:+.1f}")
+        if tsb > 5:
+            st.success("負荷平衡良好")
+        elif tsb > -5:
+            st.info("負荷適中")
+        else:
+            st.warning("近期負荷偏高")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("### 今日建議")
+    if readiness >= 75:
+        st.success(advice)
+    elif readiness >= 50:
+        st.info(advice)
+    else:
+        st.warning(advice)
+
+    st.caption("數據僅供個人參考。完整細節請至「準備度分析」與「訓練負荷」頁面查看。")
+    st.stop()
+
+elif page == "準備度分析":
+    st.title("🏃 跑步準備度分析")
+    st.caption("整合 Garmin 手錶資料 · 隨時查看身體狀況與訓練建議")
+    # (existing readiness logic continues below)
+elif page == "總覽 Overview":
+    st.title("總覽 Overview")
+    st.caption("本週重點與今日狀態")
+
+    if not api_key:
+        st.warning("請先輸入 API Key。")
+        st.stop()
+
+    try:
+        client = GarminPersonalClient(api_key)
+        today = date.today()
+        with st.spinner("載入總覽..."):
+            activities = client.search_activities(limit=20, start_date=(today - timedelta(days=7)).isoformat(), end_date=today.isoformat())
+        act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
+        week_distance = sum((a.get("distance") or 0) / 1000 for a in act_list if isinstance(a, dict))
+        week_time = sum((a.get("duration") or 0) / 60 for a in act_list if isinstance(a, dict))
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("本週距離", f"{week_distance:.1f} km")
+        c2.metric("本週時間", f"{int(week_time)} 分")
+        c3.metric("活動次數", len(act_list))
+
+        st.markdown("### 最近活動")
+        if act_list:
+            for a in act_list[:5]:
+                if isinstance(a, dict):
+                    name = a.get("activityName") or "活動"
+                    dist = (a.get("distance") or 0) / 1000
+                    st.write(f"- **{name}** · {dist:.2f} km")
+        else:
+            st.info("本週尚無活動。")
+    except Exception as e:
+        st.error(f"載入失敗：{e}")
+    st.stop()
+elif page == "訓練紀錄":
+    st.title("訓練紀錄")
+    st.caption("最近的跑步與活動紀錄")
+
+    if not api_key:
+        st.warning("請先在左側輸入 Garmin Personal API Key。")
+        st.stop()
+
+    try:
+        client = GarminPersonalClient(api_key)
+        today = date.today()
+        with st.spinner("正在載入訓練紀錄..."):
+            activities = client.search_activities(
+                limit=50,
+                start_date=(today - timedelta(days=180)).isoformat(),
+                end_date=today.isoformat(),
+            )
+
+        # Normalize response (API may return list or dict with list)
+        if isinstance(activities, dict):
+            activity_list = activities.get("activities") or activities.get("data") or []
+        elif isinstance(activities, list):
+            activity_list = activities
+        else:
+            activity_list = []
+
+        if not activity_list:
+            st.info("目前沒有找到活動紀錄。請確認手錶已同步到 Garmin Connect。")
+            st.stop()
+
+        # Build a clean table
+        rows = []
+        for act in activity_list:
+            if not isinstance(act, dict):
+                continue
+            start = act.get("startTimeLocal") or act.get("startTimeGMT") or ""
+            date_str = start[:10] if start else ""
+            name = act.get("activityName") or act.get("activityType", {}).get("typeKey") or "活動"
+            distance_m = act.get("distance") or 0
+            distance_km = round(distance_m / 1000, 2) if distance_m else 0
+            duration_s = act.get("duration") or act.get("elapsedDuration") or 0
+            minutes = int(duration_s // 60) if duration_s else 0
+            avg_hr = act.get("averageHR") or act.get("averageHeartRate") or ""
+            avg_speed = act.get("averageSpeed")  # m/s
+            pace = ""
+            if avg_speed and avg_speed > 0:
+                pace_min_per_km = 1000 / (avg_speed * 60)
+                pace = f"{int(pace_min_per_km)}:{int((pace_min_per_km % 1) * 60):02d}"
+            rows.append({
+                "日期": date_str,
+                "活動": name,
+                "距離 (km)": distance_km,
+                "時間 (分)": minutes,
+                "配速": pace or "—",
+                "平均心率": avg_hr or "—",
+            })
+
+        if not rows:
+            st.info("無法解析活動資料。")
+            st.stop()
+
+        df = pd.DataFrame(rows)
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "距離 (km)": st.column_config.NumberColumn(format="%.2f"),
+                "時間 (分)": st.column_config.NumberColumn(format="%d"),
+            },
+        )
+
+        # Summary metrics
+        total_distance = df["距離 (km)"].sum()
+        total_time = df["時間 (分)"].sum()
+        run_count = len(df)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("活動次數", run_count)
+        col2.metric("總距離", f"{total_distance:.1f} km")
+        col3.metric("總時間", f"{total_time} 分")
+
+        st.success(f"已載入最近 {run_count} 筆活動（最多 180 天）。")
+
+    except Exception as e:
+        st.error(f"載入訓練紀錄失敗：{e}")
+        st.info("請確認 API Key 正確，或稍後再試。")
+    st.stop()
+elif page == "長期趨勢":
+    st.title("長期趨勢")
+    st.caption("近 30 日活動距離趨勢")
+
+    if not api_key:
+        st.warning("請先輸入 API Key。")
+        st.stop()
+
+    try:
+        client = GarminPersonalClient(api_key)
+        today = date.today()
+        with st.spinner("載入趨勢..."):
+            activities = client.search_activities(limit=60, start_date=(today - timedelta(days=30)).isoformat(), end_date=today.isoformat())
+        act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
+        daily = {}
+        for a in act_list:
+            if isinstance(a, dict):
+                d = (a.get("startTimeLocal") or "")[:10]
+                if d:
+                    daily[d] = daily.get(d, 0) + (a.get("distance") or 0) / 1000
+        if daily:
+            df = pd.DataFrame(list(daily.items()), columns=["日期", "距離 (km)"]).sort_values("日期")
+            st.line_chart(df.set_index("日期"))
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("近 30 日尚無足夠資料。")
+    except Exception as e:
+        st.error(f"載入失敗：{e}")
+    st.stop()
+elif page == "訓練負荷":
+    st.title("訓練負荷")
+    st.caption("CTL（長期負荷）· ATL（短期負荷）· TSB（訓練壓力平衡）")
+
+    if not api_key:
+        st.warning("請先在左側輸入 Garmin Personal API Key。")
+        st.stop()
+
+    try:
+        client = GarminPersonalClient(api_key)
+        today = date.today()
+        with st.spinner("正在計算訓練負荷..."):
+            activities = client.search_activities(
+                limit=100,
+                start_date=(today - timedelta(days=120)).isoformat(),
+                end_date=today.isoformat(),
+            )
+
+        # Normalize list
+        if isinstance(activities, dict):
+            activity_list = activities.get("activities") or activities.get("data") or []
+        elif isinstance(activities, list):
+            activity_list = activities
+        else:
+            activity_list = []
+
+        # Build daily load (simple TRIMP-like: duration_min * avg_hr_factor)
+        daily_load = {}
+        for act in activity_list:
+            if not isinstance(act, dict):
+                continue
+            start = act.get("startTimeLocal") or ""
+            d = start[:10]
+            if not d:
+                continue
+            duration_min = (act.get("duration") or 0) / 60
+            avg_hr = act.get("averageHR") or act.get("averageHeartRate") or 140
+            # Simple load proxy (higher HR & longer = higher load)
+            load = duration_min * (avg_hr / 150)
+            daily_load[d] = daily_load.get(d, 0) + load
+
+        if not daily_load:
+            st.info("目前沒有足夠的活動資料來計算訓練負荷。請確認手錶已同步。")
+            st.stop()
+
+        # Create full date range and fill zeros
+        dates = pd.date_range(start=today - timedelta(days=90), end=today, freq="D")
+        load_series = pd.Series(0.0, index=dates)
+        for d_str, load in daily_load.items():
+            try:
+                dt = pd.to_datetime(d_str)
+                if dt in load_series.index:
+                    load_series[dt] = load
+            except Exception:
+                continue
+
+        # CTL (42-day exponential), ATL (7-day exponential)
+        # Using simple rolling mean as approximation (good enough for personal use)
+        ctl = load_series.rolling(window=42, min_periods=7).mean().fillna(0)
+        atl = load_series.rolling(window=7, min_periods=3).mean().fillna(0)
+        tsb = ctl - atl
+
+        current_ctl = float(ctl.iloc[-1])
+        current_atl = float(atl.iloc[-1])
+        current_tsb = float(tsb.iloc[-1])
+
+        # Metrics
+        c1, c2, c3 = st.columns(3)
+        c1.metric("CTL（長期負荷）", f"{current_ctl:.1f}", help="約 42 日平均負荷，代表體能基礎")
+        c2.metric("ATL（短期負荷）", f"{current_atl:.1f}", help="約 7 日平均負荷，代表近期疲勞")
+        c3.metric("TSB（訓練壓力平衡）", f"{current_tsb:+.1f}", help="CTL - ATL，正值表示恢復良好")
+
+        # Status message
+        if current_tsb > 5:
+            st.success("負荷平衡良好，還有空間穩定增量。")
+        elif current_tsb > -5:
+            st.info("負荷適中，可維持目前訓練節奏。")
+        else:
+            st.warning("近期負荷偏高，建議安排恢復或輕鬆日。")
+
+        # Chart
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=ctl.index, y=ctl, name="CTL（長期）", line=dict(color="#3498db", width=2)))
+        fig.add_trace(go.Scatter(x=atl.index, y=atl, name="ATL（短期）", line=dict(color="#e74c3c", width=2)))
+        fig.add_trace(go.Scatter(x=tsb.index, y=tsb, name="TSB", line=dict(color="#2ecc71", width=2, dash="dot")))
+        fig.update_layout(
+            height=400,
+            margin=dict(l=20, r=20, t=30, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            xaxis_title="日期",
+            yaxis_title="負荷指數",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.caption("負荷指數為根據活動時間與平均心率估算的相對值（非官方 TSS）。數值僅供個人參考與趨勢觀察。")
+
+    except Exception as e:
+        st.error(f"計算訓練負荷失敗：{e}")
+        st.info("請確認 API Key 正確，或稍後再試。")
+    st.stop()
+elif page == "心率與配速":
+    st.title("心率與配速")
+    st.caption("近期活動的心率與配速")
+
+    if not api_key:
+        st.warning("請先輸入 API Key。")
+        st.stop()
+
+    try:
+        client = GarminPersonalClient(api_key)
+        today = date.today()
+        with st.spinner("載入資料..."):
+            activities = client.search_activities(limit=30, start_date=(today - timedelta(days=60)).isoformat(), end_date=today.isoformat())
+        act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
+        rows = []
+        for a in act_list:
+            if not isinstance(a, dict):
+                continue
+            avg_hr = a.get("averageHR") or a.get("averageHeartRate")
+            avg_speed = a.get("averageSpeed")
+            pace = "—"
+            if avg_speed and avg_speed > 0:
+                p = 1000 / (avg_speed * 60)
+                pace = f"{int(p)}:{int((p % 1)*60):02d}"
+            rows.append({
+                "日期": (a.get("startTimeLocal") or "")[:10],
+                "活動": a.get("activityName") or "活動",
+                "平均心率": avg_hr or "—",
+                "配速": pace,
+                "距離 (km)": round((a.get("distance") or 0)/1000, 2),
+            })
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("尚無足夠活動資料。")
+    except Exception as e:
+        st.error(f"載入失敗：{e}")
+    st.stop()
+elif page == "數據關係分析":
+    st.title("數據關係分析")
+    st.info("此頁面將顯示 HRV、睡眠與訓練表現的關聯。目前可先查看「訓練負荷」與「心率與配速」。")
+    st.stop()
+
+elif page == "本週訓練":
+    st.title("本週訓練")
+    st.caption("本週活動摘要")
+
+    if not api_key:
+        st.warning("請先輸入 API Key。")
+        st.stop()
+
+    try:
+        client = GarminPersonalClient(api_key)
+        today = date.today()
+        monday = today - timedelta(days=today.weekday())
+        with st.spinner("載入本週資料..."):
+            activities = client.search_activities(limit=20, start_date=monday.isoformat(), end_date=today.isoformat())
+        act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
+        if not act_list:
+            st.info("本週尚無活動紀錄。")
+            st.stop()
+        total_km = sum((a.get("distance") or 0)/1000 for a in act_list if isinstance(a, dict))
+        st.metric("本週總距離", f"{total_km:.1f} km")
+        for a in act_list:
+            if isinstance(a, dict):
+                st.write(f"**{(a.get('startTimeLocal') or '')[:10]}** · {a.get('activityName') or '活動'} · {(a.get('distance') or 0)/1000:.2f} km")
+    except Exception as e:
+        st.error(f"載入失敗：{e}")
+    st.stop()
+
+elif page == "計劃總覽":
+    st.title("計劃總覽")
+    st.info("訓練計劃功能開發中。之後可在此查看與管理週期計劃。")
+    st.stop()
+
+elif page == "訓練工具箱":
+    st.title("訓練工具箱")
+    st.markdown("### 配速計算器")
+    distance = st.number_input("距離 (公里)", min_value=1.0, value=5.0, step=0.5)
+    time_min = st.number_input("目標時間 (分鐘)", min_value=1.0, value=25.0, step=1.0)
+    if distance > 0 and time_min > 0:
+        pace = time_min / distance
+        st.success(f"配速：{int(pace)}:{int((pace % 1)*60):02d} / 公里")
+    st.markdown("---")
+    st.info("更多工具（心率區間、VDOT 等）開發中。")
+    st.stop()
+
+elif page == "AI 教練":
+    st.title("AI 教練")
+    st.info("AI 教練功能開發中。之後將根據你的準備度與負荷提供個人化建議。")
+    if st.button("取得今日建議（簡易版）"):
+        st.success("建議維持穩定訓練，注意恢復。完整 AI 分析即將上線。")
+    st.stop()
+
+elif page == "設定":
+    st.title("設定")
+    st.markdown("### 目前設定")
+    st.write(f"API Key：{'已設定' if api_key else '未設定'}")
+    st.info("更多設定選項（顯示偏好、單位等）開發中。")
+    st.stop()
+
+# ========== Original readiness page logic continues ==========
 
 if not api_key:
     st.warning("請先在左側輸入 Garmin Personal API Key，即可開始同步真實資料。")
