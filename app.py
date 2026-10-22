@@ -89,33 +89,57 @@ with st.sidebar:
         st.markdown("3. 建立 Key 並複製貼上")
     st.caption("官方 Personal API · 僅讀取你自己的資料")
 
-# ========== Top quick navigation (mobile friendly) ==========
-quick_pages = ["訓練狀態", "本週訓練", "訓練紀錄", "準備度分析", "訓練負荷", "訓練工具箱"]
-if "page" not in st.session_state:
-    st.session_state["page"] = "訓練狀態"
-
+# ========== Floating bottom navigation ==========
 st.markdown("""
 <style>
-.quick-nav button {
-    margin-right: 6px;
-    margin-bottom: 6px;
+/* Make the last horizontal block of buttons float at the bottom */
+div[data-testid="stHorizontalBlock"]:last-of-type {
+    position: fixed !important;
+    bottom: 16px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    background: #ffffff !important;
+    border-radius: 28px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
+    padding: 6px 8px !important;
+    z-index: 9999 !important;
+    max-width: 96vw !important;
+    width: auto !important;
+    gap: 4px !important;
+}
+div[data-testid="stHorizontalBlock"]:last-of-type button {
     border-radius: 20px !important;
-    font-size: 14px !important;
-    padding: 6px 14px !important;
+    font-size: 13px !important;
+    padding: 8px 12px !important;
+    white-space: nowrap !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-cols = st.columns(len(quick_pages))
-for i, qp in enumerate(quick_pages):
-    with cols[i]:
-        if st.button(qp, key=f"quick_{qp}", use_container_width=True,
-                     type="primary" if st.session_state["page"] == qp else "secondary"):
-            st.session_state["page"] = qp
+quick_pages = ["訓練狀態", "本週訓練", "訓練紀錄", "準備度分析", "訓練負荷", "工具箱"]
+if "page" not in st.session_state:
+    st.session_state["page"] = "訓練狀態"
+
+page_map = {
+    "訓練狀態": "訓練狀態",
+    "本週訓練": "本週訓練",
+    "訓練紀錄": "訓練紀錄",
+    "準備度分析": "準備度分析",
+    "訓練負荷": "訓練負荷",
+    "工具箱": "訓練工具箱",
+}
+
+nav_cols = st.columns(len(quick_pages))
+for i, label in enumerate(quick_pages):
+    with nav_cols[i]:
+        is_active = st.session_state["page"] == page_map[label]
+        if st.button(label, key=f"float_{label}", use_container_width=True,
+                     type="primary" if is_active else "secondary"):
+            st.session_state["page"] = page_map[label]
             st.rerun()
 
 page = st.session_state["page"]
-st.markdown("---")
+st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
 
 # ========== Page routing ==========
 if page == "訓練狀態":
