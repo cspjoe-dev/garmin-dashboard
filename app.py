@@ -16,24 +16,27 @@ from garmin_client import GarminPersonalClient
 
 st.set_page_config(page_title="跑步儀表板", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS
+# Custom CSS — cleaner modern style
 st.markdown("""
 <style>
-    .main { background-color: #faf8f5; }
-    .stApp { background-color: #faf8f5; }
-    h1, h2, h3 { color: #2c3e50; }
+    .main { background-color: #f7f5f2; }
+    .stApp { background-color: #f7f5f2; }
+    h1, h2, h3 { color: #1a1a1a; font-weight: 600; }
     .metric-card {
-        background: white;
-        border-radius: 12px;
-        padding: 16px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        margin-bottom: 12px;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        margin-bottom: 16px;
+        border: 1px solid #eee;
     }
     .readiness-score {
-        font-size: 48px;
-        font-weight: bold;
-        color: #2ecc71;
+        font-size: 52px;
+        font-weight: 700;
+        line-height: 1;
     }
+    .stMetric { background: #fff; border-radius: 12px; padding: 12px; }
+    div[data-testid="stSidebar"] { background-color: #ffffff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -325,7 +328,10 @@ elif page == "長期趨勢":
                     daily[d] = daily.get(d, 0) + (a.get("distance") or 0) / 1000
         if daily:
             df = pd.DataFrame(list(daily.items()), columns=["日期", "距離 (km)"]).sort_values("日期")
-            st.line_chart(df.set_index("日期"))
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df["日期"], y=df["距離 (km)"], mode="lines+markers", name="每日距離", line=dict(color="#3498db", width=2)))
+            fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title="日期", yaxis_title="距離 (km)")
+            st.plotly_chart(fig, use_container_width=True)
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.info("近 30 日尚無足夠資料。")
@@ -479,7 +485,7 @@ elif page == "數據關係分析":
 
 elif page == "本週訓練":
     st.title("本週訓練")
-    st.caption("本週活動摘要")
+    st.caption("本週活動與跑量趨勢")
 
     if not api_key:
         st.warning("請先輸入 API Key。")
@@ -492,14 +498,30 @@ elif page == "本週訓練":
         with st.spinner("載入本週資料..."):
             activities = client.search_activities(limit=20, start_date=monday.isoformat(), end_date=today.isoformat())
         act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
-        if not act_list:
-            st.info("本週尚無活動紀錄。")
-            st.stop()
-        total_km = sum((a.get("distance") or 0)/1000 for a in act_list if isinstance(a, dict))
+
+        # Daily volume this week
+        daily_km = {}
+        for a in act_list:
+            if isinstance(a, dict):
+                d = (a.get("startTimeLocal") or "")[:10]
+                if d:
+                    daily_km[d] = daily_km.get(d, 0) + (a.get("distance") or 0) / 1000
+
+        total_km = sum(daily_km.values())
         st.metric("本週總距離", f"{total_km:.1f} km")
+
+        if daily_km:
+            df = pd.DataFrame(list(daily_km.items()), columns=["日期", "距離 (km)"]).sort_values("日期")
+            fig = go.Figure(go.Bar(x=df["日期"], y=df["距離 (km)"], marker_color="#3498db"))
+            fig.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### 活動明細")
         for a in act_list:
             if isinstance(a, dict):
                 st.write(f"**{(a.get('startTimeLocal') or '')[:10]}** · {a.get('activityName') or '活動'} · {(a.get('distance') or 0)/1000:.2f} km")
+        if not act_list:
+            st.info("本週尚無活動紀錄。")
     except Exception as e:
         st.error(f"載入失敗：{e}")
     st.stop()
@@ -511,14 +533,44 @@ elif page == "計劃總覽":
 
 elif page == "訓練工具箱":
     st.title("訓練工具箱")
+
     st.markdown("### 配速計算器")
     distance = st.number_input("距離 (公里)", min_value=1.0, value=5.0, step=0.5)
     time_min = st.number_input("目標時間 (分鐘)", min_value=1.0, value=25.0, step=1.0)
     if distance > 0 and time_min > 0:
         pace = time_min / distance
         st.success(f"配速：{int(pace)}:{int((pace % 1)*60):02d} / 公里")
+
     st.markdown("---")
-    st.info("更多工具（心率區間、VDOT 等）開發中。")
+    st.markdown("### VDOT 估算（簡易版）")
+    st.caption("根據近期最佳成績估算跑步能力（Jack Daniels 公式近似）")
+    race_dist = st.selectbox("比賽距離", ["5 km", "10 km", "半程馬拉松", "全馬"])
+    race_time = st.number_input("完賽時間 (分鐘)", min_value=10.0, value=25.0, step=1.0)
+    dist_map = {"5 km": 5, "10 km": 10, "半程馬拉松": 21.0975, "全馬": 42.195}
+    d = dist_map.get(race_dist, 5)
+    if race_time > 0 and d > 0:
+        # Simple VDOT approximation
+        pace_sec = (race_time * 60) / d
+        # Rough formula (not exact Daniels, but useful personal reference)
+        vdot = 0.000104 * (d * 1000 / (race_time * 60))**2 + 0.182258 * (d * 1000 / (race_time * 60)) - 4.6
+        vdot = max(20, min(85, vdot))
+        st.metric("估算 VDOT", f"{vdot:.1f}")
+        st.info("數值越高代表跑步能力越好。僅供個人參考，非官方計算。")
+
+    st.markdown("---")
+    st.markdown("### 心率區間建議（依年齡）")
+    age = st.number_input("年齡", min_value=15, max_value=80, value=35, step=1)
+    max_hr = 220 - age
+    st.write(f"估計最大心率：{max_hr} bpm")
+    zones = {
+        "恢復 (50-60%)": (0.5, 0.6),
+        "輕鬆 (60-70%)": (0.6, 0.7),
+        "有氧 (70-80%)": (0.7, 0.8),
+        "閾值 (80-90%)": (0.8, 0.9),
+        "無氧 (90-100%)": (0.9, 1.0),
+    }
+    for name, (lo, hi) in zones.items():
+        st.write(f"**{name}**：{int(max_hr*lo)} – {int(max_hr*hi)} bpm")
     st.stop()
 
 elif page == "AI 教練":
