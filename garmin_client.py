@@ -21,14 +21,16 @@ class GarminPersonalClient:
     def _ensure_token(self) -> str:
         if self.access_token and self.token_expires and datetime.utcnow() < self.token_expires - timedelta(minutes=5):
             return self.access_token
-        headers = {"Authorization": f"ApiKey {self.api_key}"}
+        headers = {"Authorization": f"ApiKey {self.api_key}", "Accept": "*/*"}
         resp = self.session.post(TOKEN_URL, headers=headers, timeout=30)
         resp.raise_for_status()
-        data = resp.json()
-        self.access_token = data.get("access_token") or data.get("token")
-        # Assume ~24h if not specified
-        expires_in = data.get("expires_in", 86400)
-        self.token_expires = datetime.utcnow() + timedelta(seconds=expires_in)
+        # Official endpoint returns the bearer token as plain text (JWT), not JSON
+        token_text = resp.text.strip()
+        if not token_text:
+            raise ValueError("Token endpoint returned empty response")
+        self.access_token = token_text
+        # Default to 24h; JWT exp claim can be parsed later if needed
+        self.token_expires = datetime.utcnow() + timedelta(hours=23)
         return self.access_token
 
     def get(self, path: str, params: Optional[Dict] = None) -> Any:
