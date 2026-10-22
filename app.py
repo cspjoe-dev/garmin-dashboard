@@ -48,7 +48,6 @@ with st.sidebar:
     # Full navigation (still available when sidebar is opened)
     page_options = [
         "總覽 Overview",
-        "訓練狀態",
         "訓練紀錄",
         "準備度分析",
         "長期趨勢",
@@ -56,15 +55,12 @@ with st.sidebar:
         "心率與配速",
         "數據關係分析",
         "本週訓練",
-        "計劃總覽",
         "訓練工具箱",
-        "AI 教練",
-        "設定",
     ]
     page = st.radio(
         "功能選單",
         page_options,
-        index=page_options.index(st.session_state.get("page", "訓練狀態")),
+        index=page_options.index(st.session_state.get("page", "總覽 Overview")),
         label_visibility="collapsed",
         key="sidebar_page",
     )
@@ -89,57 +85,45 @@ with st.sidebar:
         st.markdown("3. 建立 Key 並複製貼上")
     st.caption("官方 Personal API · 僅讀取你自己的資料")
 
-# ========== Floating bottom navigation ==========
-st.markdown("""
-<style>
-/* Make the last horizontal block of buttons float at the bottom */
-div[data-testid="stHorizontalBlock"]:last-of-type {
-    position: fixed !important;
-    bottom: 16px !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    background: #ffffff !important;
-    border-radius: 28px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
-    padding: 6px 8px !important;
-    z-index: 9999 !important;
-    max-width: 96vw !important;
-    width: auto !important;
-    gap: 4px !important;
-}
-div[data-testid="stHorizontalBlock"]:last-of-type button {
-    border-radius: 20px !important;
-    font-size: 13px !important;
-    padding: 8px 12px !important;
-    white-space: nowrap !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-quick_pages = ["訓練狀態", "本週訓練", "訓練紀錄", "準備度分析", "訓練負荷", "工具箱"]
+# ========== Homepage quick cards (方案 D) ==========
 if "page" not in st.session_state:
-    st.session_state["page"] = "訓練狀態"
-
-page_map = {
-    "訓練狀態": "訓練狀態",
-    "本週訓練": "本週訓練",
-    "訓練紀錄": "訓練紀錄",
-    "準備度分析": "準備度分析",
-    "訓練負荷": "訓練負荷",
-    "工具箱": "訓練工具箱",
-}
-
-nav_cols = st.columns(len(quick_pages))
-for i, label in enumerate(quick_pages):
-    with nav_cols[i]:
-        is_active = st.session_state["page"] == page_map[label]
-        if st.button(label, key=f"float_{label}", use_container_width=True,
-                     type="primary" if is_active else "secondary"):
-            st.session_state["page"] = page_map[label]
-            st.rerun()
+    st.session_state["page"] = "總覽 Overview"
 
 page = st.session_state["page"]
-st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
+
+if page == "總覽 Overview":
+    st.title("跑步儀表板")
+    st.caption("選擇功能進入，或從左側選單查看更多")
+
+    # Quick entry cards
+    cards = [
+        ("訓練紀錄", "查看近期活動明細"),
+        ("準備度分析", "今日身體準備狀態"),
+        ("本週訓練", "本週跑量與活動"),
+        ("訓練負荷", "CTL / ATL / TSB 趨勢"),
+        ("長期趨勢", "歷史跑量與負荷變化"),
+        ("心率與配速", "配速與心率分析"),
+        ("數據關係分析", "心率 vs 配速關係"),
+        ("訓練工具箱", "配速、VDOT、心率區間"),
+    ]
+
+    cols = st.columns(2)
+    for i, (title, desc) in enumerate(cards):
+        with cols[i % 2]:
+            with st.container():
+                st.markdown(f"""
+                <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee; box-shadow:0 1px 4px rgba(0,0,0,0.05);">
+                    <div style="font-weight:600; font-size:16px;">{title}</div>
+                    <div style="color:#666; font-size:13px; margin-top:4px;">{desc}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("進入", key=f"card_{title}", use_container_width=True):
+                    st.session_state["page"] = title
+                    st.rerun()
+
+    st.markdown("---")
+    st.info("完整選單與 Garmin 連線設定在左側側邊欄。")
+    st.stop()
 
 # ========== Page routing ==========
 if page == "訓練狀態":
@@ -240,43 +224,8 @@ elif page == "準備度分析":
     st.title("🏃 跑步準備度分析")
     st.caption("整合 Garmin 手錶資料 · 隨時查看身體狀況與訓練建議")
     # (existing readiness logic continues below)
-elif page == "總覽 Overview":
-    st.title("總覽 Overview")
-    st.caption("本週重點與今日狀態")
 
-    if not api_key:
-        st.warning("請先輸入 API Key。")
-        st.stop()
-
-    try:
-        client = GarminPersonalClient(api_key)
-        today = date.today()
-        with st.spinner("載入總覽..."):
-            activities = client.search_activities(limit=20, start_date=(today - timedelta(days=7)).isoformat(), end_date=today.isoformat())
-        act_list = activities if isinstance(activities, list) else (activities or {}).get("activities") or []
-        week_distance = sum((a.get("distance") or 0) / 1000 for a in act_list if isinstance(a, dict))
-        week_time = sum((a.get("duration") or 0) / 60 for a in act_list if isinstance(a, dict))
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("本週距離", f"{week_distance:.1f} km")
-        c2.metric("本週時間", f"{int(week_time)} 分")
-        c3.metric("活動次數", len(act_list))
-
-        st.markdown("### 最近活動")
-        if act_list:
-            for a in act_list[:5]:
-                if isinstance(a, dict):
-                    name = a.get("activityName") or "活動"
-                    dist = (a.get("distance") or 0) / 1000
-                    st.write(f"- **{name}** · {dist:.2f} km")
-        else:
-            st.info("本週尚無活動。")
-    except Exception as e:
-        st.error(f"載入失敗：{e}")
-    st.stop()
 elif page == "訓練紀錄":
-    st.title("訓練紀錄")
-    st.caption("最近的跑步與活動紀錄")
 
     if not api_key:
         st.warning("請先在左側輸入 Garmin Personal API Key。")
