@@ -92,26 +92,48 @@ else:
                     return default
             return d
 
+        def to_number(val, default=70):
+            """Safely convert API value to a number."""
+            if isinstance(val, (int, float)):
+                return float(val)
+            if isinstance(val, dict):
+                # Common patterns: {"value": 78} or nested
+                for k in ("value", "score", "overall"):
+                    if k in val and isinstance(val[k], (int, float)):
+                        return float(val[k])
+            return default
+
         # HRV
-        hrv_last_night = safe_get(hrv_data, "lastNightAvg") or safe_get(hrv_data, "weeklyAvg") or 0
+        hrv_raw = safe_get(hrv_data, "lastNightAvg") or safe_get(hrv_data, "weeklyAvg")
+        hrv_last_night = to_number(hrv_raw, 0)
         hrv_status = safe_get(hrv_data, "status") or "未知"
+        if isinstance(hrv_status, dict):
+            hrv_status = hrv_status.get("status") or str(hrv_status)
 
         # Sleep
-        sleep_score = safe_get(sleep_data, "dailySleepDTO", "sleepScores", "overall", "value") or \
-                      safe_get(sleep_data, "sleepScores", "overall") or 70
+        sleep_raw = (
+            safe_get(sleep_data, "dailySleepDTO", "sleepScores", "overall", "value")
+            or safe_get(sleep_data, "dailySleepDTO", "sleepScores", "overall")
+            or safe_get(sleep_data, "sleepScores", "overall")
+        )
+        sleep_score = to_number(sleep_raw, 70)
 
         # Resting HR from summaries
         resting_hr = 55
         if summaries and isinstance(summaries, dict) and "data" in summaries:
             for s in summaries.get("data", []):
-                if s.get("calendarDate") == today.isoformat() or s.get("calendarDate") == yesterday.isoformat():
-                    resting_hr = s.get("restingHeartRate") or resting_hr
+                if isinstance(s, dict) and (
+                    s.get("calendarDate") == today.isoformat()
+                    or s.get("calendarDate") == yesterday.isoformat()
+                ):
+                    rhr = s.get("restingHeartRate")
+                    if isinstance(rhr, (int, float)):
+                        resting_hr = rhr
                     break
 
         # Simple readiness approximation (0-100)
-        # Real Garmin uses more factors; this is a transparent estimate
         hrv_factor = min(100, max(40, (hrv_last_night / 50) * 70)) if hrv_last_night else 70
-        sleep_factor = sleep_score if sleep_score else 70
+        sleep_factor = sleep_score
         readiness = int(0.45 * hrv_factor + 0.35 * sleep_factor + 0.2 * 75)
         readiness = max(1, min(100, readiness))
 
